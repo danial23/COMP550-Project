@@ -7,12 +7,12 @@ import requests
 
 S = requests.Session()
 
-URL = "https://mediawiki.org/w/api.php"
+URL = "https://en.wikipedia.org/w/api.php"
 
 PARAMS = {
     "action": "query",
     "prop": "revisions",
-    "titles": "Main Page",
+    "titles": "Let Us Continue",
     "rvlimit": "100",
     "rvprop": "timestamp|user|comment|context|tags",
     "rvdir": "newer",
@@ -27,4 +27,5 @@ DATA = R.json()
 PAGES = DATA["query"]["pages"]
 
 for page in PAGES:
-    print(page["revisions"])
+    for rev in page["revisions"]:
+        print(rev)
