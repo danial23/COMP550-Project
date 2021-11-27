@@ -12,37 +12,45 @@ S.headers.update({"User-Agent" : "script (danialmtmdmhr23@gmail.com)", "Accept-e
 API = "https://en.wikipedia.org/w/api.php"
 
 
-def dump_data(data):
-    pass
+def get_all_revisions(title : str) -> list:
+    """
+    Repeatedly sends requests to API to get ALL revision data
+    """
+    
+    start_time = time.time() # for benchmarking
 
-
-def get_all_revisions(title):
-    start_time = time.time() #####
-
+    # request parameters
     PARAMS = {
         "action": "query",
         "prop": "revisions",
         "titles": title,
-        "rvprop": "flags|timestamp|userid|size|comment|tags",
+        "rvprop": "flags|timestamp|userid|size|comment|tags|content",
         "rvslots": "main",
-        "rvlimit": "max",
+        "rvlimit": "max", # 50 when contents requested, 500-5000 otherwise
         "formatversion": "2",
         "format": "json",
-        "maxlag" : "2",
+        "maxlag" : "2", # lower is nicer, should be lower than 5
     }
 
+    # send request
     R = S.get(url=API, params=PARAMS)
+
+    # get json data
     DATA = R.json()
 
+    # print error and exit (use another strategy for a more robust script)
     if "error" in DATA or "warning" in DATA:
         print(json.dumps(DATA, indent=4))
         return None
     
+    # we only have a single page in query
     PAGE = DATA["query"]["pages"][0]
     revisions = PAGE["revisions"]
 
+    # "continue" field marks unfinished query
     while "continue" in DATA:
 
+        # modify parameters to include last query's rvcontinue
         PARAMS.update({"rvcontinue" : DATA["continue"]["rvcontinue"]})
         
         R = S.get(url=API, params=PARAMS)
@@ -53,19 +61,20 @@ def get_all_revisions(title):
             return None
         
         PAGE = DATA["query"]["pages"][0]
+
+        # append to the revision list
         revisions += PAGE["revisions"]
     
-    end_time = time.time() #####
+    end_time = time.time() # for benchmarking
 
-    print(end_time - start_time) ####
+    print("Total time for page \"" + title + "\":", end_time - start_time) # for benchmarking
+    print("Total revisions:", len(revisions)) # for benchmarking
 
     return revisions
 
 
 def main():
     revisions = get_all_revisions("SQLite")
-    print(revisions)
-    print(len(revisions))
 
 
 if __name__ == "__main__":
