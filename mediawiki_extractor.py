@@ -6,6 +6,8 @@
 import requests
 import json
 import time
+import mwparserfromhell
+
 
 S = requests.Session()
 S.headers.update({"User-Agent": "script (danialmtmdmhr23@gmail.com)", "Accept-encoding": "gzip"})
@@ -74,9 +76,11 @@ def get_all_revisions(title: str) -> list:
 
 
 def main():
-    revisions = get_all_revisions("Jaguar")
+    revisions = get_all_revisions("SQLite")
     count = count_reverts(revisions)
-    print(count)
+    process_revision_contents(revisions)
+    print("Reverted count:", count)
+    print("Revision plaintext example:\n", revisions[-1]["slots"]["main"]["content"])
 
 
 def save_revisions(revisions, filename):
@@ -93,6 +97,22 @@ def count_reverts(revisions):
             if q == 'mw-undo' or q == 'mw-reverted' or q == 'Reverted' or q == 'mw-manual-revert':
                 count = count + 1
     return count
+
+
+def process_revision_contents(revisions: list)-> None:
+    """
+    Converts the revision content from wikitext to plaintext
+
+    :param revisions: A list containing all revisions to be processed
+    """
+    for rev in revisions:
+        if "slots" not in rev or "main" not in rev["slots"] or "content" not in rev["slots"]["main"]:
+            break
+        content = rev["slots"]["main"]["content"]
+        parsed_content = mwparserfromhell.parse(content) # parse wikitext
+        stripped_content = parsed_content.strip_code() # strip code
+        rev["slots"]["main"]["content"] = stripped_content
+
 
 
 if __name__ == "__main__":
