@@ -1,0 +1,5 @@
+# ignore everything in the dataset folder
+dataset/*
+
+# exception
+!dataset/fetched_titles.json
