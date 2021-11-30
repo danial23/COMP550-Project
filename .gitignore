@@ -2,4 +2,4 @@
 dataset/*
 
 # exception
-!dataset/fetched_titles.json
+!dataset/titles_fetched.json
