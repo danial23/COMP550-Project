@@ -24,9 +24,7 @@ for i, r in enumerate(revisions):
     content.append(r["slots"]["main"]["content"])
 
 targets = pp.tagsToTargets(tags)
-targets.pop()   #because we're only looking at the differences
-diffData = pp.contentToDiff(content)
-data = pp.contentToNgramVectors(diffData, 1, 2)
+data = pp.contentToNgramVectors(content, 1, 2)
 
 d_train, d_test, t_train, t_test = train_test_split(data, targets, test_size=0.15)
 
