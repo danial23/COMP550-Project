@@ -12,14 +12,24 @@ from sklearn import preprocessing
 import difflib
 
 
-def tagsToTargets(tags):
-    # tags should be passed as an list/series of tag lists
+def tagsToTargets(revisions):
+    # revisions should be passed as an list/series of revisions
     targets = []
     reverted = False
-    for t in tags:
+    rollback = False
+    for r in revisions:
+        t = r['tags']
         for q in t:
-            if q == 'mw-undo' or q == 'mw-reverted' or q == 'Reverted' or q == 'mw-manual-revert':
+            if q == 'mw-reverted' or q == 'Reverted' or q == 'mw-manual-revert':
                 reverted = True
+            if q == 'mw-rollback':
+                rollback = True
+        if rollback:
+            i = revisions.index[r] - 1
+            user = revisions[i]['userid']
+            while i >= 0 and revisions[i]['userid'] == user:
+                targets[i] = 1
+                i -= 1
         if reverted:
             targets.append(1)
         else:
