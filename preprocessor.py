@@ -15,11 +15,17 @@ import difflib
 def tagsToTargets(tags):
     # tags should be passed as an list/series of tag lists
     targets = []
+    reverted = False
     for t in tags:
-        if 'Reverted' in tags:
+        for q in t:
+            if q == 'mw-undo' or q == 'mw-reverted' or q == 'Reverted' or q == 'mw-manual-revert':
+                reverted = True
+        if reverted:
             targets.append(1)
         else:
             targets.append(0)
+        reverted = False
+    return targets
 
 
 def contentToNgramVectors(content, n, N):
