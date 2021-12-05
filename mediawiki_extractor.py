@@ -18,7 +18,9 @@ _S = requests.Session()
 _S.headers.update({"User-Agent": "script (danialmtmdmhr23@gmail.com)", "Accept-encoding": "gzip"})
 _API = "https://en.wikipedia.org/w/api.php"
 _DATASET_DIR = "dataset"
+
 _titles_fetched = {}
+
 
 
 def get_all_revisions(title: str) -> list:
@@ -39,39 +41,37 @@ def get_all_revisions(title: str) -> list:
         "maxlag": "2",  # lower is nicer, should be lower than 5
     }
 
-    R = _S.get(url=_API, params=PARAMS)
-    DATA = R.json()
+    revisions = []
 
-    if not is_valid_response(DATA):
-        return None
+    while True:
+        data = _S.get(url=_API, params=PARAMS).json()
 
-    # there should be a single page in the response
-    revisions = DATA["query"]["pages"][0]["revisions"]
-
-    report_progress(len(revisions))
-
-    # presence of a "continue" key denotes an unfinished query
-    while "continue" in DATA:
-
-        # modify parameters to include "rvcontinue" value from the last query
-        PARAMS.update({"rvcontinue": DATA["continue"]["rvcontinue"]})
-
-        R = _S.get(url=_API, params=PARAMS)
-        DATA = R.json()
-
-        if not is_valid_response(DATA):
+        if not _is_valid_response(data):
             return None
 
-        revisions += DATA["query"]["pages"][0]["revisions"]
+        # there should be a single page in the response
+        revisions += data["query"]["pages"][0]["revisions"]
 
-        report_progress(len(revisions))
+        _report_progress(title, len(revisions))
+
+        if "continue" not in data:
+            break
+
+        # modify parameters to include "rvcontinue" value from the last query
+        PARAMS.update({"rvcontinue": data["continue"]["rvcontinue"]})
     
-    logging.info(f"Received {len(revisions)} revisions for page: {title}")
+    print()
+
+    logging.info(f"Received {len(revisions)} revisions for page \"{title}\"")
 
     return revisions
 
 
-def is_valid_response(data):
+def _report_progress(title, revs):
+    print(f"{title} - {revs} revisions", end="\r")
+
+
+def _is_valid_response(data):
     """
     Checks the response from wikipedia revision API for errors and warnings.
     Returns False on error; otherwise returns True.
@@ -86,7 +86,7 @@ def is_valid_response(data):
     return True
 
 
-def save_page(page, filename):
+def _save_page(page, filename):
     """
     Saves a page to disk. A page is a dict with two keys: "title" and "revisions"
     """
@@ -94,6 +94,13 @@ def save_page(page, filename):
         json.dump(page, f)
         f.write('')
         logging.info("Page revision data saved to file: \"%s\"", filename)
+
+
+def _save_titles_fetched():
+    with open("titles_fetched.json", "w+") as f:
+        json.dump(_titles_fetched, f)
+        f.write("")
+        logging.debug("Saved titles_fetched.json")
 
 
 def count_reverts(revisions):
@@ -106,10 +113,6 @@ def count_reverts(revisions):
     return count
 
 
-def report_progress(i):
-    print(f"Progress: {i} items", end='\r')
-
-
 def add_benchmarking(func):
     """
     Adds benchmarking to any function
@@ -119,16 +122,36 @@ def add_benchmarking(func):
         start_time = time.time()
         value = func(* args, ** kwargs)
         end_time = time.time()
-        logging.debug(f"Completed call to {func.__name__} in {end_time - start_time:.2f} seconds.")
+        logging.debug(f"Finished call to {func.__name__} in {end_time - start_time:.2f} seconds.")
         return value
     return benchmarked
 
 
-def save_titles_fetched():
-    with open("titles_fetched.json", "w+") as f:
-        json.dump(_titles_fetched, f)
-        f.write("")
-        logging.debug("Saved titles_fetched.json")
+def _avg_time_per_page():
+    """
+    Returns a function to report the average time it takes to get all revisions of a page
+    """
+    PAGE_WINDOW_SIZE = 20
+    start_time = time.time()
+    page_window = [start_time for _ in range(PAGE_WINDOW_SIZE)]
+    page_index = 0
+    def report_avg():
+        nonlocal start_time, page_window, page_index
+
+        current_time = time.time()
+        page_index += 1
+
+        # calculate time/page average
+        array_index = (page_index + 1) % PAGE_WINDOW_SIZE - 1
+        start_time = page_window[array_index]
+        n = min(page_index, PAGE_WINDOW_SIZE)
+        avg_time_per_page = (current_time - start_time) / n
+
+        # update window
+        page_window[array_index] = current_time
+
+        print(f"Average time per page (last {n} pages) = {avg_time_per_page:.0f}s")
+    return report_avg
 
 
 def main():
@@ -139,36 +162,35 @@ def main():
     with open("titles.json", "r") as f:
         titles = json.load(f)
     
-    os.chdir("dataset")
+    os.chdir(_DATASET_DIR)
+
     try:
         with open("titles_fetched.json", 'r') as f:
             _titles_fetched = json.load(f)
     except FileNotFoundError:
         _titles_fetched = {}
 
+
     print("Press CTRL-C at any point to stop the script.")
-
-    get_all_revisions_benchmarked = add_benchmarking(get_all_revisions)
-
+    report_avg_time = _avg_time_per_page()
     for index, title in enumerate(titles):
         
-        # do we have the data for this page already?
         if title in _titles_fetched:
             continue
 
-        revisions = get_all_revisions_benchmarked(title)
+        revisions = get_all_revisions(title)
 
         if not revisions:
             break
-        print(f"Received {len(revisions)} revisions for page: {title}")
         
         filename = str(index) + ".json"
-        save_page({"page" : title, "revisions": revisions}, filename)
+        _save_page({"page" : title, "revisions": revisions}, filename)
         _titles_fetched[title] = filename
-        save_titles_fetched()
+        _save_titles_fetched()
+
+        report_avg_time()
     
     print("Done.")
-
 
 
 if __name__ == "__main__":
@@ -181,5 +203,5 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         logging.info("User requested to stop the script via keyboard interrupt.")
-        save_titles_fetched()
+        _save_titles_fetched()
         sys.exit(0)
