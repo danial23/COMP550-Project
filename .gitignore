@@ -1,5 +1,8 @@
 # ignore everything in the dataset folder
 dataset/*
 
+# ignore log files
+*.log
+
 # exception
 !dataset/titles_fetched.json

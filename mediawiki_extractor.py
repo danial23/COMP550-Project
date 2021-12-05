@@ -6,33 +6,27 @@
 # Data collection script
 
 import requests
-import threading
 import json
 import time
-import mwparserfromhell
-import msvcrt
 import os
+import functools
+import logging
+import sys
 
 
-STOP_KEY = b'q' # pressing q will stop the script
-
-# when set to true, the program stops executing the script gracefully
-global stop_signal
-stop_signal = False
-
-S = requests.Session()
-S.headers.update({"User-Agent": "script (danialmtmdmhr23@gmail.com)", "Accept-encoding": "gzip"})
-API = "https://en.wikipedia.org/w/api.php"
+_S = requests.Session()
+_S.headers.update({"User-Agent": "script (danialmtmdmhr23@gmail.com)", "Accept-encoding": "gzip"})
+_API = "https://en.wikipedia.org/w/api.php"
+_DATASET_DIR = "dataset"
+_titles_fetched = {}
 
 
 def get_all_revisions(title: str) -> list:
     """
     Repeatedly sends requests to API to get ALL revision data
     """
+    logging.debug(f"Getting revisions for title: {title}")
 
-    start_time = time.time()  # for benchmarking
-
-    # request parameters
     PARAMS = {
         "action": "query",
         "prop": "revisions",
@@ -45,53 +39,51 @@ def get_all_revisions(title: str) -> list:
         "maxlag": "2",  # lower is nicer, should be lower than 5
     }
 
-    # send request
-    R = S.get(url=API, params=PARAMS)
-
-    # get json data
+    R = _S.get(url=_API, params=PARAMS)
     DATA = R.json()
 
-    # print error and exit (use another strategy for a more robust script)
-    if "error" in DATA or "warning" in DATA:
-        print(json.dumps(DATA, indent=4))
+    if not is_valid_response(DATA):
         return None
 
-    # we only have a single page in query
-    PAGE = DATA["query"]["pages"][0]
-    revisions = PAGE["revisions"]
-    process_revision_contents(revisions)
+    # there should be a single page in the response
+    revisions = DATA["query"]["pages"][0]["revisions"]
 
     report_progress(len(revisions))
 
-    # "continue" field marks unfinished query
-    # stop_signal is set by the user by pressing the stop key
-    while "continue" in DATA and not stop_signal:
+    # presence of a "continue" key denotes an unfinished query
+    while "continue" in DATA:
 
-        # modify parameters to include last query's rvcontinue
+        # modify parameters to include "rvcontinue" value from the last query
         PARAMS.update({"rvcontinue": DATA["continue"]["rvcontinue"]})
 
-        R = S.get(url=API, params=PARAMS)
+        R = _S.get(url=_API, params=PARAMS)
         DATA = R.json()
 
-        if "error" in DATA or "warning" in DATA:
-            print(json.dumps(DATA, indent=4))
+        if not is_valid_response(DATA):
             return None
 
-        PAGE = DATA["query"]["pages"][0]
-
-        revisions_added = PAGE["revisions"]
-        process_revision_contents(revisions_added)
-
-        # append to the revision list
-        revisions += revisions_added
+        revisions += DATA["query"]["pages"][0]["revisions"]
 
         report_progress(len(revisions))
-
-    end_time = time.time()  # for benchmarking
-
-    print("\nTotal time for page \"" + title + "\":", end_time - start_time)  # for benchmarking
+    
+    logging.info(f"Received {len(revisions)} revisions for page: {title}")
 
     return revisions
+
+
+def is_valid_response(data):
+    """
+    Checks the response from wikipedia revision API for errors and warnings.
+    Returns False on error; otherwise returns True.
+    """
+    if "error" in data:
+        logging.error("API reported an error: %s", json.dumps(data, indent=4))
+        return False
+
+    if "warning" in data:
+        logging.warning("API reported a warning: %s", json.dumps(data, indent=4))
+    
+    return True
 
 
 def save_page(page, filename):
@@ -101,7 +93,7 @@ def save_page(page, filename):
     with open(filename, 'w+') as f:
         json.dump(page, f)
         f.write('')
-        print('Page revision data saved to', filename)
+        logging.info("Page revision data saved to file: \"%s\"", filename)
 
 
 def count_reverts(revisions):
@@ -114,95 +106,80 @@ def count_reverts(revisions):
     return count
 
 
-def process_revision_contents(revisions: list)-> None:
-    """
-    Converts the revision content from wikitext to plaintext
-
-    :param revisions: A list containing all revisions to be processed
-    """
-    for rev in revisions:
-        if "slots" not in rev or "main" not in rev["slots"] or "content" not in rev["slots"]["main"]:
-            break
-        content = rev["slots"]["main"]["content"]
-        parsed_content = mwparserfromhell.parse(content) # parse wikitext
-        stripped_content = parsed_content.strip_code() # strip code
-        rev["slots"]["main"]["content"] = stripped_content
-
-
 def report_progress(i):
     print(f"Progress: {i} items", end='\r')
 
 
-
-def detect_stop_signal():
+def add_benchmarking(func):
     """
-    Stops the program when it receives a key stroke that matches STOP_KEY
+    Adds benchmarking to any function
     """
-    while True:
-        ch = msvcrt.getch()
-        if ch == STOP_KEY:
-            print('\n\n*** Quitting script ***\n\n')
-            global stop_signal
-            stop_signal = True
-            exit(0)
+    @functools.wraps(func)
+    def benchmarked(* args, ** kwargs):
+        start_time = time.time()
+        value = func(* args, ** kwargs)
+        end_time = time.time()
+        logging.debug(f"Completed call to {func.__name__} in {end_time - start_time:.2f} seconds.")
+        return value
+    return benchmarked
 
+
+def save_titles_fetched():
+    with open("titles_fetched.json", "w+") as f:
+        json.dump(_titles_fetched, f)
+        f.write("")
+        logging.debug("Saved titles_fetched.json")
 
 
 def main():
-    # load titles
-    with open('titles.json', "r") as f:
+    global _titles_fetched
+
+    logging.info("Script started.")
+
+    with open("titles.json", "r") as f:
         titles = json.load(f)
-
-    # change working directory
-    os.chdir('dataset')
-
-    # try to load previously fetched titles
+    
+    os.chdir("dataset")
     try:
-        with open('titles_fetched.json', 'r') as f:
-            titles_fetched = json.load(f)
+        with open("titles_fetched.json", 'r') as f:
+            _titles_fetched = json.load(f)
     except FileNotFoundError:
-        titles_fetched = {}
-    
-    
-    print("Press Q at any point to stop the script gracefully.")
+        _titles_fetched = {}
 
+    print("Press CTRL-C at any point to stop the script.")
+
+    get_all_revisions_benchmarked = add_benchmarking(get_all_revisions)
 
     for index, title in enumerate(titles):
         
-        # already got the rev data from this page
-        if title in titles_fetched:
+        # do we have the data for this page already?
+        if title in _titles_fetched:
             continue
-        
-        revisions = get_all_revisions(title)
 
-        # dont save if we get interrupted
-        if stop_signal:
-            break
+        revisions = get_all_revisions_benchmarked(title)
 
-        # null check (there was an error in the request response)
         if not revisions:
             break
+        print(f"Received {len(revisions)} revisions for page: {title}")
         
-        # save rev data to disk
-        save_page({"page" : title, "revisions": revisions}, str(index) +'.json')
-
-        # update and save titles_fetched
-        titles_fetched[title] = index
-        with open('titles_fetched.json', 'w+') as f:
-            json.dump(titles_fetched, f)
-            f.write('')
+        filename = str(index) + ".json"
+        save_page({"page" : title, "revisions": revisions}, filename)
+        _titles_fetched[title] = filename
+        save_titles_fetched()
     
     print("Done.")
 
 
 
 if __name__ == "__main__":
-    
-    # this thread just waits for the STOP_KEY key stroke (set at top of the script)
-    wait_thread = threading.Thread(name='wait_for_quit_key', target=detect_stop_signal)
+    logging.basicConfig(format="%(asctime)s %(levelname)-8s %(name)-15s %(message)s",
+                filename="mediawiki_extractor.log", level=logging.DEBUG)
+    logging.getLogger("requests").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
 
-    # main work thread
-    main_thread = threading.Thread(name='script_main', target=main)
-
-    wait_thread.start()
-    main_thread.start()
+    try:
+        main()
+    except KeyboardInterrupt:
+        logging.info("User requested to stop the script via keyboard interrupt.")
+        save_titles_fetched()
+        sys.exit(0)

@@ -4,8 +4,8 @@ import re
 import os
 
 
-os.chdir('dataset')
-with open("1.json", 'r') as f:
+os.chdir("dataset")
+with open("1.json", "r") as f:
     data = json.load(f)
 beforeString: str = data["revisions"][13]["slots"]["main"]["content"]
 afterString: str = data["revisions"][12]["slots"]["main"]["content"]
