@@ -12,14 +12,30 @@ from sklearn import preprocessing
 import difflib
 
 
-def tagsToTargets(tags):
-    # tags should be passed as an list/series of tag lists
+def tagsToTargets(revisions):
+    # revisions should be passed as an list/series of revisions
     targets = []
-    for t in tags:
-        if 'Reverted' in tags:
+    reverted = False
+    rollback = False
+    for r in revisions:
+        t = r['tags']
+        for q in t:
+            if q == 'mw-reverted' or q == 'Reverted' or q == 'mw-manual-revert':
+                reverted = True
+            if q == 'mw-rollback':
+                rollback = True
+        if rollback:
+            i = revisions.index(r) - 1
+            user = revisions[i]['userid']
+            while i >= 0 and revisions[i]['userid'] == user:
+                targets[i] = 1
+                i -= 1
+        if reverted:
             targets.append(1)
         else:
             targets.append(0)
+        reverted = False
+    return targets
 
 
 def contentToNgramVectors(content, n, N):
@@ -47,6 +63,24 @@ def contentToDiff(content):
                 diffstring += line + '\n'
         contentDiff.append(diffstring)
     return contentDiff
+
+
+def timesToDiff(times):
+    # takes a list or series of datetime objects
+    # returns list of ints (difference in seconds)
+    diffTimes = []
+    for i, t in enumerate(times):
+        if i == len(times):
+            break
+        delta = t - times[i+1]
+        diffTimes.append[delta.total_seconds()]
+    return diffTimes
+
+
+def vectorsAppend(matrix, list):
+    # matrix and list should have same size
+    for v, x in zip(matrix, list):
+        v.append(x)
 
 
 def timesToDiff(times):
