@@ -10,7 +10,7 @@ import threading
 import json
 import time
 import mwparserfromhell
-import msvcrt
+#import msvcrt
 import os
 
 
@@ -24,6 +24,7 @@ S = requests.Session()
 S.headers.update({"User-Agent": "script (danialmtmdmhr23@gmail.com)", "Accept-encoding": "gzip"})
 API = "https://en.wikipedia.org/w/api.php"
 
+oldest_date = "2020-07-20T21:06:21Z"
 
 def get_all_revisions(title: str) -> list:
     """
@@ -63,9 +64,13 @@ def get_all_revisions(title: str) -> list:
 
     report_progress(len(revisions))
 
+    not_too_old = True
+
     # "continue" field marks unfinished query
     # stop_signal is set by the user by pressing the stop key
-    while "continue" in DATA and not stop_signal:
+    # not_too_old stops the loop when it gets am edit older than oldest_date
+
+    while "continue" in DATA and not stop_signal and not_too_old:
 
         # modify parameters to include last query's rvcontinue
         PARAMS.update({"rvcontinue": DATA["continue"]["rvcontinue"]})
@@ -82,6 +87,16 @@ def get_all_revisions(title: str) -> list:
         revisions_added = PAGE["revisions"]
         process_revision_contents(revisions_added)
 
+        if(len(revisions_added)>=50):
+            #print(revisions_added[49]["timestamp"])
+            if revisions_added[49]["timestamp"]<oldest_date:
+                #print("reached oldest date")
+                not_too_old = False
+
+
+
+
+
         # append to the revision list
         revisions += revisions_added
 
@@ -90,6 +105,8 @@ def get_all_revisions(title: str) -> list:
     end_time = time.time()  # for benchmarking
 
     print("\nTotal time for page \"" + title + "\":", end_time - start_time)  # for benchmarking
+
+    print("With :" + str(count_reverts(revisions)) + " reverts")
 
     return revisions
 
@@ -109,7 +126,7 @@ def count_reverts(revisions):
     for i in revisions:
         # print(i["tags"])
         for q in i["tags"]:
-            if q == 'mw-undo' or q == 'mw-reverted' or q == 'Reverted' or q == 'mw-manual-revert':
+            if q == 'mw-reverted' or q == 'Reverted' or q == 'mw-manual-revert':
                 count = count + 1
     return count
 
@@ -199,10 +216,10 @@ def main():
 if __name__ == "__main__":
     
     # this thread just waits for the STOP_KEY key stroke (set at top of the script)
-    wait_thread = threading.Thread(name='wait_for_quit_key', target=detect_stop_signal)
+    #wait_thread = threading.Thread(name='wait_for_quit_key', target=detect_stop_signal)
 
     # main work thread
     main_thread = threading.Thread(name='script_main', target=main)
 
-    wait_thread.start()
+    #wait_thread.start()
     main_thread.start()
