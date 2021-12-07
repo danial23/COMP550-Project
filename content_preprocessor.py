@@ -5,9 +5,9 @@ import os
 import mwparserfromhell
 
 
-def process_revision_contents(revisions: list)-> None:
+def process_revision_contents(revisions)-> None:
     """
-    Converts the revision content from wikitext to plaintext
+    Process all revisions of one page.
 
     Args:
         revisions: A list containing all revisions to be processed
@@ -16,28 +16,41 @@ def process_revision_contents(revisions: list)-> None:
         if "slots" not in rev or "main" not in rev["slots"] or "content" not in rev["slots"]["main"]:
             break
         content = rev["slots"]["main"]["content"]
-        parsed_content = mwparserfromhell.parse(content) # parse wikitext
-        stripped_content = parsed_content.strip_code() # strip code
-        rev["slots"]["main"]["content"] = stripped_content
+        rev["slots"]["main"]["content"] = _wikitext_to_plaintext(content)
+
+
+def _wikitext_to_plaintext(wikitext: str)-> str:
+    """
+    Parse wikitext and return plaintext
+    """
+    parsed_content = mwparserfromhell.parse(wikitext) # parse wikitext
+    stripped_content = parsed_content.strip_code() # strip code
+    return stripped_content
+
+
+def _content_diff(old_content: str, new_content: str) -> str:
+    """
+    Returns a string showing diff (git format)
+    """
+
+    beforeSequence = list(filter(None, re.split("(.*?\. )|(?:\n)", old_content)))
+    afterSequence = list(filter(None, re.split("(.*?\. )|(?:\n)", new_content)))
+
+    diff = difflib.unified_diff(beforeSequence, afterSequence)
+
+    diffString = ""
+    for line in diff:
+        diffString += line + "\n"
+    
+    return diffString
 
 
 
-os.chdir("dataset")
-with open("1.json", "r") as f:
-    data = json.load(f)
-beforeString: str = data["revisions"][13]["slots"]["main"]["content"]
-afterString: str = data["revisions"][12]["slots"]["main"]["content"]
+def main():
+    os.chdir('dataset')
+    with open("titles_fetched.json", 'r') as f:
+        titles_fetched = json.load(f)
 
-beforeSequence = list(filter(None, re.split("(.*?\. )|(?:\n)", beforeString)))
-afterSequence = list(filter(None, re.split("(.*?\. )|(?:\n)", afterString)))
 
-# seq0 = list(filter(None, re.split('(?: )|(?:\n)', str0)))
-# seq1 = list(filter(None, re.split('(?: )|(?:\n)', str1)))
-
-diff = difflib.unified_diff(beforeSequence, afterSequence)
-
-diffString = ""
-for line in diff:
-    diffString += line + "\n"
-
-print(diffString)
+if (__name__ == "__main__"):
+    main()
