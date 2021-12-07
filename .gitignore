@@ -4,5 +4,8 @@ dataset/*
 # ignore log files
 *.log
 
+# ignore pycache
+__pycache__
+
 # exception
 !dataset/titles_fetched.json
