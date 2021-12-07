@@ -18,6 +18,7 @@ _S = requests.Session()
 _S.headers.update({"User-Agent": "script (danialmtmdmhr23@gmail.com)", "Accept-encoding": "gzip"})
 _API = "https://en.wikipedia.org/w/api.php"
 _DATASET_DIR = "dataset"
+_OLDEST_DATE = "2020-07-20T21:06:21Z"
 
 _titles_fetched = {}
 
@@ -50,8 +51,14 @@ def get_all_revisions(title: str) -> list:
             return None
 
         # there should be a single page in the response
-        revisions += data["query"]["pages"][0]["revisions"]
+        revisions_received = data["query"]["pages"][0]["revisions"]
 
+        if revisions_received[-1]["timestamp"] < _OLDEST_DATE:
+            revisions += _without_old_revisions(revisions_received)
+            _report_progress(title, len(revisions))
+            break
+
+        revisions += revisions_received
         _report_progress(title, len(revisions))
 
         if "continue" not in data:
@@ -64,6 +71,16 @@ def get_all_revisions(title: str) -> list:
 
     logging.info(f"Received {len(revisions)} revisions for page \"{title}\"")
 
+    return revisions
+
+
+def _without_old_revisions(revisions):
+    """
+    Returns a list of revisions not including revisions older than _OLDEST_DATE
+    """
+    for i in range(len(revisions)):
+        if revisions[i]["timestamp"] < _OLDEST_DATE:
+            return revisions[:i]
     return revisions
 
 
@@ -131,7 +148,7 @@ def _avg_time_per_page():
     """
     Returns a function to report the average time it takes to get all revisions of a page
     """
-    PAGE_WINDOW_SIZE = 20
+    PAGE_WINDOW_SIZE = 100
     start_time = time.time()
     page_window = [start_time for _ in range(PAGE_WINDOW_SIZE)]
     page_index = 0
@@ -150,7 +167,7 @@ def _avg_time_per_page():
         # update window
         page_window[array_index] = current_time
 
-        print(f"Average time per page (last {n} pages) = {avg_time_per_page:.0f}s")
+        print(f"Average time per page = {avg_time_per_page:.2f}s")
     return report_avg
 
 
