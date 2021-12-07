@@ -2,10 +2,28 @@ import difflib
 import json
 import re
 import os
+import mwparserfromhell
 
 
-os.chdir('dataset')
-with open("1.json", 'r') as f:
+def process_revision_contents(revisions: list)-> None:
+    """
+    Converts the revision content from wikitext to plaintext
+
+    Args:
+        revisions: A list containing all revisions to be processed
+    """
+    for rev in revisions:
+        if "slots" not in rev or "main" not in rev["slots"] or "content" not in rev["slots"]["main"]:
+            break
+        content = rev["slots"]["main"]["content"]
+        parsed_content = mwparserfromhell.parse(content) # parse wikitext
+        stripped_content = parsed_content.strip_code() # strip code
+        rev["slots"]["main"]["content"] = stripped_content
+
+
+
+os.chdir("dataset")
+with open("1.json", "r") as f:
     data = json.load(f)
 beforeString: str = data["revisions"][13]["slots"]["main"]["content"]
 afterString: str = data["revisions"][12]["slots"]["main"]["content"]

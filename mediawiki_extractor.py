@@ -6,34 +6,30 @@
 # Data collection script
 
 import requests
-import threading
 import json
 import time
-import mwparserfromhell
-#import msvcrt
 import os
+import functools
+import logging
+import sys
 
 
-STOP_KEY = b'q' # pressing q will stop the script
+_S = requests.Session()
+_S.headers.update({"User-Agent": "script (danialmtmdmhr23@gmail.com)", "Accept-encoding": "gzip"})
+_API = "https://en.wikipedia.org/w/api.php"
+_DATASET_DIR = "dataset"
+_OLDEST_DATE = "2020-07-20T21:06:21Z"
 
-# when set to true, the program stops executing the script gracefully
-global stop_signal
-stop_signal = False
+_titles_fetched = {}
 
-S = requests.Session()
-S.headers.update({"User-Agent": "script (danialmtmdmhr23@gmail.com)", "Accept-encoding": "gzip"})
-API = "https://en.wikipedia.org/w/api.php"
 
-oldest_date = "2020-07-20T21:06:21Z"
 
 def get_all_revisions(title: str) -> list:
     """
     Repeatedly sends requests to API to get ALL revision data
     """
+    logging.debug(f"Getting revisions for title: {title}")
 
-    start_time = time.time()  # for benchmarking
-
-    # request parameters
     PARAMS = {
         "action": "query",
         "prop": "revisions",
@@ -46,79 +42,82 @@ def get_all_revisions(title: str) -> list:
         "maxlag": "2",  # lower is nicer, should be lower than 5
     }
 
-    # send request
-    R = S.get(url=API, params=PARAMS)
+    revisions = []
 
-    # get json data
-    DATA = R.json()
+    while True:
+        data = _S.get(url=_API, params=PARAMS).json()
 
-    # print error and exit (use another strategy for a more robust script)
-    if "error" in DATA or "warning" in DATA:
-        print(json.dumps(DATA, indent=4))
-        return None
-
-    # we only have a single page in query
-    PAGE = DATA["query"]["pages"][0]
-    revisions = PAGE["revisions"]
-    process_revision_contents(revisions)
-
-    report_progress(len(revisions))
-
-    not_too_old = True
-
-    # "continue" field marks unfinished query
-    # stop_signal is set by the user by pressing the stop key
-    # not_too_old stops the loop when it gets am edit older than oldest_date
-
-    while "continue" in DATA and not stop_signal and not_too_old:
-
-        # modify parameters to include last query's rvcontinue
-        PARAMS.update({"rvcontinue": DATA["continue"]["rvcontinue"]})
-
-        R = S.get(url=API, params=PARAMS)
-        DATA = R.json()
-
-        if "error" in DATA or "warning" in DATA:
-            print(json.dumps(DATA, indent=4))
+        if not _is_valid_response(data):
             return None
 
-        PAGE = DATA["query"]["pages"][0]
+        # there should be a single page in the response
+        revisions_received = data["query"]["pages"][0]["revisions"]
 
-        revisions_added = PAGE["revisions"]
-        process_revision_contents(revisions_added)
+        if revisions_received[-1]["timestamp"] < _OLDEST_DATE:
+            revisions += _without_old_revisions(revisions_received)
+            _report_progress(title, len(revisions))
+            break
 
-        if(len(revisions_added)>=50):
-            #print(revisions_added[49]["timestamp"])
-            if revisions_added[49]["timestamp"]<oldest_date:
-                #print("reached oldest date")
-                not_too_old = False
+        revisions += revisions_received
+        _report_progress(title, len(revisions))
 
+        if "continue" not in data:
+            break
 
+        # modify parameters to include "rvcontinue" value from the last query
+        PARAMS.update({"rvcontinue": data["continue"]["rvcontinue"]})
+    
+    print()
 
-
-
-        # append to the revision list
-        revisions += revisions_added
-
-        report_progress(len(revisions))
-
-    end_time = time.time()  # for benchmarking
-
-    print("\nTotal time for page \"" + title + "\":", end_time - start_time)  # for benchmarking
-
-    print("With :" + str(count_reverts(revisions)) + " reverts")
+    logging.info(f"Received {len(revisions)} revisions for page \"{title}\"")
 
     return revisions
 
 
-def save_page(page, filename):
+def _without_old_revisions(revisions):
+    """
+    Returns a list of revisions not including revisions older than _OLDEST_DATE
+    """
+    for i in range(len(revisions)):
+        if revisions[i]["timestamp"] < _OLDEST_DATE:
+            return revisions[:i]
+    return revisions
+
+
+def _report_progress(title, revs):
+    print(f"{title} - {revs} revisions", end="\r")
+
+
+def _is_valid_response(data):
+    """
+    Checks the response from wikipedia revision API for errors and warnings.
+    Returns False on error; otherwise returns True.
+    """
+    if "error" in data:
+        logging.error("API reported an error: %s", json.dumps(data, indent=4))
+        return False
+
+    if "warning" in data:
+        logging.warning("API reported a warning: %s", json.dumps(data, indent=4))
+    
+    return True
+
+
+def _save_page(page, filename):
     """
     Saves a page to disk. A page is a dict with two keys: "title" and "revisions"
     """
     with open(filename, 'w+') as f:
         json.dump(page, f)
         f.write('')
-        print('Page revision data saved to', filename)
+        logging.info("Page revision data saved to file: \"%s\"", filename)
+
+
+def _save_titles_fetched():
+    with open("titles_fetched.json", "w+") as f:
+        json.dump(_titles_fetched, f)
+        f.write("")
+        logging.debug("Saved titles_fetched.json")
 
 
 def count_reverts(revisions):
@@ -126,100 +125,100 @@ def count_reverts(revisions):
     for i in revisions:
         # print(i["tags"])
         for q in i["tags"]:
-            if q == 'mw-reverted' or q == 'Reverted' or q == 'mw-manual-revert':
+            if q == 'mw-undo' or q == 'mw-reverted' or q == 'Reverted' or q == 'mw-manual-revert':
                 count = count + 1
     return count
 
 
-def process_revision_contents(revisions: list)-> None:
+def add_benchmarking(func):
     """
-    Converts the revision content from wikitext to plaintext
-
-    :param revisions: A list containing all revisions to be processed
+    Adds benchmarking to any function
     """
-    for rev in revisions:
-        if "slots" not in rev or "main" not in rev["slots"] or "content" not in rev["slots"]["main"]:
-            break
-        content = rev["slots"]["main"]["content"]
-        parsed_content = mwparserfromhell.parse(content) # parse wikitext
-        stripped_content = parsed_content.strip_code() # strip code
-        rev["slots"]["main"]["content"] = stripped_content
+    @functools.wraps(func)
+    def benchmarked(* args, ** kwargs):
+        start_time = time.time()
+        value = func(* args, ** kwargs)
+        end_time = time.time()
+        logging.debug(f"Finished call to {func.__name__} in {end_time - start_time:.2f} seconds.")
+        return value
+    return benchmarked
 
 
-def report_progress(i):
-    print(f"Progress: {i} items", end='\r')
-
-
-
-def detect_stop_signal():
+def _avg_time_per_page():
     """
-    Stops the program when it receives a key stroke that matches STOP_KEY
+    Returns a function to report the average time it takes to get all revisions of a page
     """
-    while True:
-        ch = msvcrt.getch()
-        if ch == STOP_KEY:
-            print('\n\n*** Quitting script ***\n\n')
-            global stop_signal
-            stop_signal = True
-            exit(0)
+    PAGE_WINDOW_SIZE = 100
+    start_time = time.time()
+    page_window = [start_time for _ in range(PAGE_WINDOW_SIZE)]
+    page_index = 0
+    def report_avg():
+        nonlocal start_time, page_window, page_index
 
+        current_time = time.time()
+        page_index += 1
+
+        # calculate time/page average
+        array_index = (page_index + 1) % PAGE_WINDOW_SIZE - 1
+        start_time = page_window[array_index]
+        n = min(page_index, PAGE_WINDOW_SIZE)
+        avg_time_per_page = (current_time - start_time) / n
+
+        # update window
+        page_window[array_index] = current_time
+
+        print(f"Average time per page = {avg_time_per_page:.2f}s")
+    return report_avg
 
 
 def main():
-    # load titles
-    with open('titles.json', "r") as f:
+    global _titles_fetched
+
+    logging.info("Script started.")
+
+    with open("titles.json", "r") as f:
         titles = json.load(f)
+    
+    os.chdir(_DATASET_DIR)
 
-    # change working directory
-    os.chdir('dataset')
-
-    # try to load previously fetched titles
     try:
-        with open('titles_fetched.json', 'r') as f:
-            titles_fetched = json.load(f)
+        with open("titles_fetched.json", 'r') as f:
+            _titles_fetched = json.load(f)
     except FileNotFoundError:
-        titles_fetched = {}
-    
-    
-    print("Press Q at any point to stop the script gracefully.")
+        _titles_fetched = {}
 
 
+    print("Press CTRL-C at any point to stop the script.")
+    report_avg_time = _avg_time_per_page()
     for index, title in enumerate(titles):
         
-        # already got the rev data from this page
-        if title in titles_fetched:
+        if title in _titles_fetched:
             continue
-        
+
         revisions = get_all_revisions(title)
 
-        # dont save if we get interrupted
-        if stop_signal:
-            break
-
-        # null check (there was an error in the request response)
         if not revisions:
             break
         
-        # save rev data to disk
-        save_page({"page" : title, "revisions": revisions}, str(index) +'.json')
+        filename = str(index) + ".json"
+        _save_page({"page" : title, "revisions": revisions}, filename)
+        _titles_fetched[title] = filename
+        _save_titles_fetched()
 
-        # update and save titles_fetched
-        titles_fetched[title] = index
-        with open('titles_fetched.json', 'w+') as f:
-            json.dump(titles_fetched, f)
-            f.write('')
+        report_avg_time()
     
     print("Done.")
 
 
-
 if __name__ == "__main__":
-    
-    # this thread just waits for the STOP_KEY key stroke (set at top of the script)
-    #wait_thread = threading.Thread(name='wait_for_quit_key', target=detect_stop_signal)
+    logging.basicConfig(format="%(asctime)s %(levelname)-8s %(name)-15s %(message)s",
+                filename="mediawiki_extractor.log", level=logging.DEBUG)
+    logging.getLogger("requests").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
 
-    # main work thread
-    main_thread = threading.Thread(name='script_main', target=main)
-
-    #wait_thread.start()
-    main_thread.start()
+    try:
+        main()
+    except KeyboardInterrupt:
+        logging.info("User requested to stop the script via keyboard interrupt.")
+        _save_titles_fetched()
+        sys.exit(0)
