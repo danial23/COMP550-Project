@@ -7,6 +7,7 @@ import preprocessor as pp
 import mediawiki_extractor as mwe
 
 revisions = []
+
 directory = os.fsencode("./dataset/")
 
 ## assuming our data is stored in json files in some dir "dataset"
@@ -44,39 +45,8 @@ d_train, d_test, t_train, t_test = train_test_split(data, targets, test_size=0.1
 clf = LogisticRegression(random_state=0, max_iter=1000)
 clf.fit(d_train, t_train)
 
+
 results = clf.predict(d_test)
 
 
-def predictionResults(predictions, goals):
-    tp, fp, tn, fn = 0, 0, 0, 0
-    for i, p in enumerate(predictions):
-        if p != goals[i]:
-            if p == 1:
-                fp += 1
-                print('Non-reverted revision with comment "' + revisions[i]["comment"] + '" was predicted to be reverted.')
-            else:
-                fn += 1
-                print('Reverted revision with comment "' + revisions[i]["comment"] + '" was missed.')
-        else:
-            if p == 1:
-                tp += 1
-            else:
-                tn += 1
-    print("Total false positives: " + str(fp))
-    print("Total true positives: " + str(tp))
-    print("Total false negatives: " + str(fn))
-    print("Total true negatives: " + str(tn))
-    print("Total mistakes: " + str(fp + fn))
-    accuracy = (tp+tn)/(fp+fn+tp+tn)
-    print("Accuracy: " + str(accuracy * 100) + "%")
-    precision = tp/(fp+tp)
-    print("Precision: " + str(precision * 100) + "%")
-    recall = tp/(fn+tp)
-    print("Recall: " + str(recall * 100) + "%")
-    specificity = tn/(fp+tn)
-    print("Specificity: " + str(specificity * 100) + "%")
-    print("F1: " + str(((2*precision*recall)/(precision+recall)) * 100) + "%")
-
-
-
-predictionResults(results, t_test)
+pp.performance("Logistic Regression Model", revisions, results, t_test)
