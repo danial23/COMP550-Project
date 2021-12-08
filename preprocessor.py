@@ -25,8 +25,8 @@ def tagsToTargets(revisions):
             if q == 'mw-rollback':
                 rollback = True
         if rollback:
+            user = revisions[revisions.index(r) - 1]['userid']
             i = revisions.index(r) - 1
-            user = revisions[i]['userid']
             while i >= 0 and revisions[i]['userid'] == user:
                 targets[i] = 1
                 i -= 1
@@ -34,6 +34,7 @@ def tagsToTargets(revisions):
             targets.append(1)
         else:
             targets.append(0)
+        rollback = False
         reverted = False
     return targets
 
@@ -70,7 +71,7 @@ def timesToDiff(times):
     # returns list of ints (difference in seconds)
     diffTimes = []
     for i, t in enumerate(times):
-        if i == len(times):
+        if i == len(revs):
             break
         delta = t - times[i+1]
         diffTimes.append[delta.total_seconds()]
@@ -83,19 +84,33 @@ def vectorsAppend(matrix, list):
         v.append(x)
 
 
-def timesToDiff(times):
-    # takes a list or series of datetime objects
-    # returns list of ints (difference in seconds)
-    diffTimes = []
-    for i, t in enumerate(times):
-        if i == len(times):
-            break
-        delta = t - times[i+1]
-        diffTimes.append[delta.total_seconds()]
-    return diffTimes
-
-
-def vectorsAppend(matrix, list):
-    # matrix and list should have same size
-    for v, x in zip(matrix, list):
-        v.append(x)
+def performance(mname, revs, predictions, goals):
+    print(mname + " performance: ")
+    tp, fp, tn, fn = 0, 0, 0, 0
+    for g, p in zip(goals, predictions):
+        if p != g:
+            if p == 1:
+                fp += 1
+                print('Non-reverted revision with comment "' + revs[goals.index(g)]["comment"] + '" was predicted to be reverted.')
+            else:
+                fn += 1
+                print('Reverted revision with comment "' + revs[goals.index(g)]["comment"] + '" was missed.')
+        else:
+            if p == 1:
+                tp += 1
+            else:
+                tn += 1
+    print("Total false positives: " + str(fp))
+    print("Total true positives: " + str(tp))
+    print("Total false negatives: " + str(fn))
+    print("Total true negatives: " + str(tn))
+    print("Total mistakes: " + str(fp + fn))
+    accuracy = (tp+tn)/(fp+fn+tp+tn)
+    print("Accuracy: " + str(accuracy * 100) + "%")
+    precision = tp/(fp+tp)
+    print("Precision: " + str(precision * 100) + "%")
+    recall = tp/(fn+tp)
+    print("Recall: " + str(recall * 100) + "%")
+    specificity = tn/(fp+tn)
+    print("Specificity: " + str(specificity * 100) + "%")
+    print("F1: " + str(((2*precision*recall)/(precision+recall)) * 100) + "%")
