@@ -55,11 +55,11 @@ def get_all_revisions(title: str) -> list:
 
         if revisions_received[-1]["timestamp"] < _OLDEST_DATE:
             revisions += _without_old_revisions(revisions_received)
-            _report_progress(title, len(revisions))
+            report_progress(title, len(revisions))
             break
 
         revisions += revisions_received
-        _report_progress(title, len(revisions))
+        report_progress(title, len(revisions))
 
         if "continue" not in data:
             break
@@ -84,7 +84,7 @@ def _without_old_revisions(revisions):
     return revisions
 
 
-def _report_progress(title, revs):
+def report_progress(title, revs):
     print(f"{title} - {revs} revisions", end="\r")
 
 
@@ -144,7 +144,7 @@ def add_benchmarking(func):
     return benchmarked
 
 
-def _avg_time_per_page():
+def avg_time_per_page():
     """
     Returns a function to report the average time it takes to get all revisions of a page
     """
@@ -189,7 +189,7 @@ def main():
 
 
     print("Press CTRL-C at any point to stop the script.")
-    report_avg_time = _avg_time_per_page()
+    report_avg_time = avg_time_per_page()
     for index, title in enumerate(titles):
         
         if title in _titles_fetched:
@@ -201,7 +201,7 @@ def main():
             break
         
         filename = str(index) + ".json"
-        _save_page({"page" : title, "revisions": revisions}, filename)
+        _save_page({"title" : title, "revisions": revisions}, filename)
         _titles_fetched[title] = filename
         _save_titles_fetched()
 

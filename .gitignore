@@ -1,5 +1,6 @@
 # ignore everything in the dataset folder
 dataset/*
+basic-processed/*
 
 # ignore log files
 *.log
