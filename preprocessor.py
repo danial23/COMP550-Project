@@ -23,7 +23,7 @@ def tagsToTargets(revisions):
     for r in revisions:
         t = r['tags']
         for q in t:
-            if q == 'mw-reverted' or q == 'Reverted' or q == 'mw-manual-revert':
+            if q == 'mw-reverted' or q == 'Reverted':
                 reverted = True
             if q == 'mw-rollback':
                 rollback = True
