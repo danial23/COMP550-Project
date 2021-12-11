@@ -95,10 +95,12 @@ def _is_valid_response(data):
     """
     if "error" in data:
         logging.error("API reported an error: %s", json.dumps(data, indent=4))
+        print("An error occurred. Check the logs for more info.")
         return False
 
     if "warning" in data:
         logging.warning("API reported a warning: %s", json.dumps(data, indent=4))
+        print("A warning occurred. Check the logs for more info.")
     
     return True
 
@@ -197,7 +199,7 @@ def main():
 
         revisions = get_all_revisions(title)
 
-        if not revisions:
+        if revisions is None:
             break
         
         filename = str(index) + ".json"
