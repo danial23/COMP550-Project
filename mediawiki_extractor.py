@@ -18,7 +18,8 @@ _S = requests.Session()
 _S.headers.update({"User-Agent": "script (danialmtmdmhr23@gmail.com)", "Accept-encoding": "gzip"})
 _API = "https://en.wikipedia.org/w/api.php"
 _DATASET_DIR = "dataset"
-_OLDEST_DATE = "2020-07-20T21:06:21Z"
+_START_DATE = "2021-12-10T23:59:59Z"
+_END_DATE = "2020-07-20T21:06:21Z"
 
 _titles_fetched = {}
 
@@ -36,6 +37,9 @@ def get_all_revisions(title: str) -> list:
         "titles": title,
         "rvprop": "flags|timestamp|userid|size|comment|tags|content",
         "rvslots": "main",
+        "rvdir": "older",
+        "rvstart": _START_DATE,
+        "rvend": _END_DATE,
         "rvlimit": "max",  # 50 when contents requested, 500-5000 otherwise
         "formatversion": "2",
         "format": "json",
@@ -53,10 +57,10 @@ def get_all_revisions(title: str) -> list:
         # there should be a single page in the response
         revisions_received = data["query"]["pages"][0]["revisions"]
 
-        if revisions_received[-1]["timestamp"] < _OLDEST_DATE:
-            revisions += _without_old_revisions(revisions_received)
-            report_progress(title, len(revisions))
-            break
+        # if revisions_received[-1]["timestamp"] < _OLDEST_DATE:
+        #     revisions += _without_old_revisions(revisions_received)
+        #     report_progress(title, len(revisions))
+        #     break
 
         revisions += revisions_received
         report_progress(title, len(revisions))
@@ -74,14 +78,14 @@ def get_all_revisions(title: str) -> list:
     return revisions
 
 
-def _without_old_revisions(revisions):
-    """
-    Returns a list of revisions not including revisions older than _OLDEST_DATE
-    """
-    for i in range(len(revisions)):
-        if revisions[i]["timestamp"] < _OLDEST_DATE:
-            return revisions[:i]
-    return revisions
+# def _without_old_revisions(revisions):
+#     """
+#     Returns a list of revisions not including revisions older than _OLDEST_DATE
+#     """
+#     for i in range(len(revisions)):
+#         if revisions[i]["timestamp"] < _OLDEST_DATE:
+#             return revisions[:i]
+#     return revisions
 
 
 def report_progress(title, revs):
@@ -94,13 +98,16 @@ def _is_valid_response(data):
     Returns False on error; otherwise returns True.
     """
     if "error" in data:
-        logging.error("API reported an error: %s", json.dumps(data, indent=4))
-        print("An error occurred. Check the logs for more info.")
+        logging.error("API reported an error: \n%s", json.dumps(data, indent=4))
+        return False
+    
+    if "query" not in data or "pages" not in data["query"] or "revisions" not in data["query"]["pages"][0]:
+        logging.error("Response data has unsuitable structure: \n%s", json.dumps(data, indent=4))
         return False
 
     if "warning" in data:
-        logging.warning("API reported a warning: %s", json.dumps(data, indent=4))
-        print("A warning occurred. Check the logs for more info.")
+        logging.warning("API reported a warning: \n%s", json.dumps(data, indent=4))
+        print("*** There was a warning in the response. Check the logs for more details. ***")
     
     return True
 
@@ -200,7 +207,8 @@ def main():
         revisions = get_all_revisions(title)
 
         if revisions is None:
-            break
+            print(f"An error occurred while processing \"{title}\". Check the logs for more details.")
+            continue
         
         filename = str(index) + ".json"
         _save_page({"title" : title, "revisions": revisions}, filename)

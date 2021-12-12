@@ -5,14 +5,14 @@ import os
 import mwparserfromhell
 import pathlib
 import logging
-import multiprocessing
+from multiprocessing import Pool, Queue
 import tqdm
-import sys
 import signal
+import logging.handlers
 
 _BASIC_PROCESSED_DIR = "basic-processed"
 _BASIC_PROCESSED_ABS_PATH = pathlib.Path(__file__).parent.joinpath(_BASIC_PROCESSED_DIR)
-_INTERRUPT = False
+_REWRITE = True # rewrite files already processed?
 
 
 def process_page_revisions(page)-> None:
@@ -28,7 +28,7 @@ def process_page_revisions(page)-> None:
         title = page["title"]
         if not _revision_has_content(rev):
             logging.warning(f"Revision has no content in main slot: Page \"{title}\" - Revision index \"{index}\"")
-            continue
+            rev["slots"]["main"]["content"] = ""
 
         content = rev["slots"]["main"]["content"]
         plaintext = _wikitext_to_plaintext(content)
@@ -37,7 +37,7 @@ def process_page_revisions(page)-> None:
             del rev["slots"]
 
         rev["reverted"] = True if "mw-reverted" in rev["tags"] else False
-        rev["comment-plaintext"] = _wikitext_to_plaintext(rev["comment"])
+        rev["comment-plaintext"] = _wikitext_to_plaintext(rev["comment"]) if "comment" in rev else ""
         rev["content"] = content
         rev["content-diff"] = "" if previous_content is None else _content_diff(previous_content, content)
         rev["content-plaintext"] = plaintext
@@ -106,13 +106,23 @@ def _save_processed_page(page, filename: str):
     with open(_BASIC_PROCESSED_ABS_PATH.joinpath(filename), 'w+') as f:
         json.dump(page, f)
         f.write('')
-        logging.info("Page preprocessed revision data saved to file: \"%s\"", filename)
+        logging.info("Preprocessed revision data saved to file: \"%s\"", filename)
 
 
 def process_file(filename):
     """
     Process a single file and save results to disk.
     """
+    global _BASIC_PROCESSED_ABS_PATH
+
+    if not _REWRITE:
+        try:
+            with open(_BASIC_PROCESSED_ABS_PATH.joinpath(filename), "r") as f:
+                logging.debug(f"Skipped processing of file \"{filename}\" because it is already processed.")
+                return True
+        except FileNotFoundError:
+            pass
+
     try:
         with open(filename, 'r') as f:
             page = json.load(f)
@@ -126,7 +136,36 @@ def process_file(filename):
     return True
 
 
-def main():
+def _init_worker(logQueue):
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    root.addHandler(logging.handlers.QueueHandler(logQueue))
+
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+
+def _init_logger():
+    """
+    Initialize logging.
+    """
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.setLevel(logging.DEBUG)
+    
+    handler = logging.FileHandler(filename="content_preprocessor.log")
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(processName)-20s %(levelname)-8s %(name)-15s %(message)s"))
+
+    root.addHandler(handler)
+
+    logQueue = Queue() # thread/process-safe queue
+    logQueueListner = logging.handlers.QueueListener(logQueue, handler)
+    
+    return logQueue, logQueueListner
+
+
+
+def main(logQueue: Queue):
     global _BASIC_PROCESSED_ABS_PATH
 
     logging.info("Script started.")
@@ -137,25 +176,25 @@ def main():
     with open("titles_fetched.json", 'r') as f:
         titles_fetched = json.load(f)
     
-    
     files = list(titles_fetched.values())
-    with multiprocessing.Pool() as pool:
-        for _ in tqdm.tqdm(pool.imap_unordered(process_file, files, chunksize=5), total=len(files)):
-            if _INTERRUPT:
-                break
+    
+    pool = Pool(processes=None, initializer=_init_worker, initargs=[logQueue])
+
+    try:
+        for _ in tqdm.tqdm(pool.imap_unordered(process_file, files), total=len(files)):
+            pass
+    except KeyboardInterrupt:
+        logging.info("User requested to stop the script via keyboard interrupt.")
+        print("KeyboardInterrupt: waiting for current jobs to finish before quitting")
+    
     pool.close()
     pool.join()
 
 
-def _sigint_handler(signum, frame):
-    global _INTERRUPT
-    logging.info("User requested to stop the script via keyboard interrupt.")
-    print("Stopping the script, gracefully.")
-    _INTERRUPT = True
+if __name__ == "__main__":
+    logQueue, logQueueListner = _init_logger()
+    logQueueListner.start()
 
+    main(logQueue)
 
-if (__name__ == "__main__"):
-    logging.basicConfig(format="%(asctime)s %(levelname)-8s %(name)-15s %(message)s",
-            filename="content_preprocessor.log", level=logging.DEBUG)
-    signal.signal(signal.SIGINT, _sigint_handler) # disable default handling of SIGINT (KeyboardInterrupt)
-    main()
+    logQueueListner.stop()
