@@ -5,11 +5,14 @@
 # preprocessor.py
 # a few methods to preprocess data for a text classifier
 
-
+import os
+import json
 import pandas as pd
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn import preprocessing
 import difflib
+import numpy as np
+from scipy import sparse
 
 
 def tagsToTargets(revisions):
@@ -20,7 +23,7 @@ def tagsToTargets(revisions):
     for r in revisions:
         t = r['tags']
         for q in t:
-            if q == 'mw-reverted' or q == 'Reverted' or q == 'mw-manual-revert':
+            if q == 'mw-reverted' or q == 'Reverted':
                 reverted = True
             if q == 'mw-rollback':
                 rollback = True
@@ -77,40 +80,71 @@ def timesToDiff(times):
         diffTimes.append[delta.total_seconds()]
     return diffTimes
 
+def addTimeData(data, times):
+    ## WIP
+    with data.toarray().shape as (n, m):
+        fixed_shape = (n, m+5)
+    fixed_data = np.ndarray(shape=fixed_shape, dtype=int)
+    for i, d in enumerate(data.toarray()):
+        time = [times[i].minute, times[i].hour, times[i].day, times[i].month, times[i].year]
+        fixed_data[i] = numpy.append(d, np.array(time))
+    return fixed_data
+    
 
-def vectorsAppend(matrix, list):
+def vectorsAppend(matrix, vector):
     # matrix and list should have same size
-    for v, x in zip(matrix, list):
-        v.append(x)
+    return sparse.hstack((matrix, np.array(vector)[:,None]))
 
 
-def performance(mname, revs, predictions, goals):
-    print(mname + " performance: ")
-    tp, fp, tn, fn = 0, 0, 0, 0
-    for g, p in zip(goals, predictions):
-        if p != g:
-            if p == 1:
-                fp += 1
-                print('Non-reverted revision with comment "' + revs[goals.index(g)]["comment"] + '" was predicted to be reverted.')
-            else:
-                fn += 1
-                print('Reverted revision with comment "' + revs[goals.index(g)]["comment"] + '" was missed.')
-        else:
-            if p == 1:
-                tp += 1
-            else:
-                tn += 1
-    print("Total false positives: " + str(fp))
-    print("Total true positives: " + str(tp))
-    print("Total false negatives: " + str(fn))
-    print("Total true negatives: " + str(tn))
-    print("Total mistakes: " + str(fp + fn))
-    accuracy = (tp+tn)/(fp+fn+tp+tn)
-    print("Accuracy: " + str(accuracy * 100) + "%")
-    precision = tp/(fp+tp)
-    print("Precision: " + str(precision * 100) + "%")
-    recall = tp/(fn+tp)
-    print("Recall: " + str(recall * 100) + "%")
-    specificity = tn/(fp+tn)
-    print("Specificity: " + str(specificity * 100) + "%")
-    print("F1: " + str(((2*precision*recall)/(precision+recall)) * 100) + "%")
+if __name__ == "__main__":
+
+    revisions = []
+
+    with open('titles.json', "r") as f:
+        titles = json.load(f)
+
+    os.chdir('dataset')
+
+    try:
+        with open('titles_fetched.json', 'r') as f:
+            titles_fetched = json.load(f)
+    except FileNotFoundError:
+        titles_fetched = {}
+
+    ## assuming our data is stored in json files numbered as they are in tites_fetched.json
+    for index, title in enumerate(titles):
+
+        if title not in titles_fetched:
+            continue
+
+        try:
+            cur_f = open(str(index) + ".json")
+            d = json.load(cur_f)
+            for r in d["revisions"]:
+                revisions.append(r)
+        except:
+            continue
+
+    content = []
+    times = []
+
+    for r in revisions:
+        try:
+            content.append(r["slots"]["main"]["content"])
+            times.append(datetime.strptime(r["timestamp"], '%Y-%m-%dT%H:%M:%SZ'))
+        except:
+            continue
+
+
+    if len(times) > len(content):
+        times = times[:len(content)]
+    elif len(content) > len(times):
+        content = content[:len(times)]
+
+    
+    data = contentToNgramVectors(content, 1, 2)
+    print("Data Vectorized")
+    sparse.save_npz("vectorized_data.npz", data)
+    print("Data saved")
+
+    #data_with_times = addTimeData(data, times)
