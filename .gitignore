@@ -5,6 +5,9 @@ basic-processed/*
 # ignore log files
 *.log
 
+# vscode settings
+.vscode/*
+
 # ignore pycache
 __pycache__
 

@@ -1,27 +1,35 @@
 import difflib
 import json
+import multiprocessing
+import concurrent.futures
 import re
 import os
 import mwparserfromhell
 import pathlib
 import logging
-from multiprocessing import Pool, Queue
 import tqdm
 import signal
 import logging.handlers
+import time
 
+_DATASET_DIR = "dataset"
 _BASIC_PROCESSED_DIR = "basic-processed"
 _BASIC_PROCESSED_ABS_PATH = pathlib.Path(__file__).parent.joinpath(_BASIC_PROCESSED_DIR)
-_REWRITE = True # rewrite files already processed?
+_REWRITE = False # rewrite files already processed?
+_PROGRESS_POSITION = 0
+
+_abort_event = type("DummyEvent", (object, ), {"is_set" : lambda: False})
 
 
-def process_page_revisions(page)-> None:
+def process_page_revisions(page, progress_callback=lambda : None)-> None:
     """
     Process all revisions of one page. Flattens the revision structure in the process.
 
     Args:
         page: A page from the dataset
     """
+    global _abort_event
+
     previous_content = None
     previous_plaintext = None
     for index, rev in reversed(list(enumerate(page["revisions"]))):
@@ -42,6 +50,11 @@ def process_page_revisions(page)-> None:
         rev["content-diff"] = "" if previous_content is None else _content_diff(previous_content, content)
         rev["content-plaintext"] = plaintext
         rev["content-plaintext-diff"] = "" if previous_content is None else _content_plaintext_diff(previous_plaintext, plaintext)
+
+        progress_callback()
+
+        if _abort_event.is_set():
+            return
 
         previous_content = content
         previous_plaintext = plaintext
@@ -109,11 +122,11 @@ def _save_processed_page(page, filename: str):
         logging.info("Preprocessed revision data saved to file: \"%s\"", filename)
 
 
-def process_file(filename):
+def process_file(filename: str):
     """
     Process a single file and save results to disk.
     """
-    global _BASIC_PROCESSED_ABS_PATH
+    global _BASIC_PROCESSED_ABS_PATH, _abort_event
 
     if not _REWRITE:
         try:
@@ -130,16 +143,34 @@ def process_file(filename):
         logging.warning(f"File {filename} not found.")
         return False
 
-    process_page_revisions(page)
-    _save_processed_page(page, filename)
+    total = 0 if "revisions" not in page else len(page["revisions"])
+    with tqdm.tqdm(desc= f"{filename}", unit="rev", total=total, position=_PROGRESS_POSITION, leave=False) as pbar:
+        
+        process_page_revisions(page, pbar.update)
+
+        if _abort_event.is_set():
+            logging.info(f"Abort set while processing file: {filename}")
+            return False
+
+        _save_processed_page(page, filename)
 
     return True
 
 
-def _init_worker(logQueue):
+def _init_worker(logQueue, tqdmLock, count, abort_event):
+    global _PROGRESS_POSITION, _abort_event
+
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
     root.addHandler(logging.handlers.QueueHandler(logQueue))
+
+    tqdm.tqdm.set_lock(tqdmLock)
+
+    with count:
+        count.value += 1
+        _PROGRESS_POSITION = count.value
+
+    _abort_event = abort_event
 
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
@@ -158,37 +189,82 @@ def _init_logger():
 
     root.addHandler(handler)
 
-    logQueue = Queue() # thread/process-safe queue
+    logQueue = multiprocessing.Queue() # thread/process-safe queue
     logQueueListner = logging.handlers.QueueListener(logQueue, handler)
     
     return logQueue, logQueueListner
 
 
+def _interrupt_handler(signum, stack):
+    logging.info("User requested to stop the script via keyboard interrupt.")
+    _abort_event.set()
 
-def main(logQueue: Queue):
-    global _BASIC_PROCESSED_ABS_PATH
+
+def main(logQueue: multiprocessing.Queue):
+    global _BASIC_PROCESSED_ABS_PATH, _abort_event
 
     logging.info("Script started.")
 
     _BASIC_PROCESSED_ABS_PATH.mkdir(exist_ok=True) # create directory if it does not exist
     
-    os.chdir('dataset')
+    os.chdir(_DATASET_DIR)
     with open("titles_fetched.json", 'r') as f:
         titles_fetched = json.load(f)
     
     files = list(titles_fetched.values())
     
-    pool = Pool(processes=None, initializer=_init_worker, initargs=[logQueue])
+    tqdmLock = multiprocessing.RLock()
+    tqdm.tqdm.set_lock(tqdmLock)
+    count = multiprocessing.Value("i", 0)
+    _abort_event = multiprocessing.Event()
+    _abort_event.clear()
+    pool_initargs = [logQueue, tqdmLock, count, _abort_event]
 
-    try:
-        for _ in tqdm.tqdm(pool.imap_unordered(process_file, files), total=len(files)):
-            pass
-    except KeyboardInterrupt:
-        logging.info("User requested to stop the script via keyboard interrupt.")
-        print("KeyboardInterrupt: waiting for current jobs to finish before quitting")
-    
-    pool.close()
-    pool.join()
+    with concurrent.futures.ProcessPoolExecutor(initializer=_init_worker, initargs=pool_initargs) as executor, \
+            tqdm.tqdm(desc="Total", unit="page", total=len(files), position=_PROGRESS_POSITION, leave=True) as pbar:
+
+        signal.signal(signal.SIGINT, _interrupt_handler)
+
+        futures = set()
+
+        def future_callback(future):
+            nonlocal futures
+            nonlocal pbar
+            pbar.update()
+            futures.remove(future)
+
+        for file in files:
+            future = executor.submit(process_file, file)
+            futures.add(future)
+            future.add_done_callback(future_callback)
+        
+        pbar.write("You can press Ctrl + C to stop at any point.")
+
+        allJobsDone = True
+        # unfinishedJobs = 0
+        while futures: # check abort_event periodically
+            if _abort_event.is_set():
+                # if all(map(lambda future: future.running(), futures)): # are the only remaining jobs all running?
+                #     pbar.write("Only a few jobs left. Waiting...")
+                #     executor.shutdown(wait=True, cancel_futures=False) # wait for the jobs to finish
+                # if futures:
+                    allJobsDone = False
+                    unfinishedJobs = len(futures)
+                    pbar.write(f"Stopping the script gracefully...")
+                    pbar.close()
+                    executor.shutdown(wait=True, cancel_futures=True)
+                    break
+            time.sleep(0.5)
+        pbar.close()
+
+        if allJobsDone:
+            logging.info("All jobs finished successfully.")
+            print("\n\nAll jobs finished successfully.\n")
+        else:
+            logging.info(f"Stopped with {unfinishedJobs} jobs remaining.")
+            print(f"\n\nThere are {unfinishedJobs} unfinished jobs.\n")
+
+        executor.shutdown(wait=True, cancel_futures=True)
 
 
 if __name__ == "__main__":
