@@ -125,9 +125,6 @@ if __name__ == "__main__":
 
             for file in os.listdir(directory):
                 path = os.path.join(directory, file)
-                size = os.path.getsize(path)
-                if size > 200000000:
-                    print("Warning large file size: " + str(size/1000) + "KB")
                 cur_f = open(path)
                 d = json.load(cur_f)
                 for r in d["revisions"]:
