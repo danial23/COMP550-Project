@@ -7,12 +7,16 @@
 
 import os
 import json
+import csv
 import pandas as pd
 from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn import preprocessing
 import difflib
 import numpy as np
 from scipy import sparse
+from torchtext.data.utils import get_tokenizer
+from torchtext.vocab import build_vocab_from_iterator
 
 
 def tagsToTargets(revisions):
@@ -23,7 +27,7 @@ def tagsToTargets(revisions):
     for r in revisions:
         t = r['tags']
         for q in t:
-            if q == 'mw-reverted' or q == 'Reverted':
+            if q == 'mw-reverted' or q == 'Reverted' or q == 'mw-manual-revert':
                 reverted = True
             if q == 'mw-rollback':
                 rollback = True
@@ -51,24 +55,6 @@ def contentToNgramVectors(content, n, N):
     return data_scaled
 
 
-def contentToDiff(content):
-    # content should be passed as an list/series of strings
-    # assuming order new(low index) -> old
-    # returns an list of strings which only show the differences between the strings
-    diff = difflib.Differ()
-    contentDiff = []
-    for i, s in enumerate(content):
-        if i == len(content)-1:
-            break   # don't process last line
-        diffstring = ""
-        sdiff = diff.compare(s.split(". "), content[i+1].split(". "))
-        for line in sdiff:
-            if line[0] != ' ':
-                diffstring += line + '\n'
-        contentDiff.append(diffstring)
-    return contentDiff
-
-
 def timesToDiff(times):
     # takes a list or series of datetime objects
     # returns list of ints (difference in seconds)
@@ -84,7 +70,7 @@ def addTimeData(data, times):
     ## WIP
     with data.toarray().shape as (n, m):
         fixed_shape = (n, m+5)
-    fixed_data = np.ndarray(shape=fixed_shape, dtype=int)
+    fixed_data = np.ndarray(shape=fixed_shape, dtype=int)   #can't allocate this much space
     for i, d in enumerate(data.toarray()):
         time = [times[i].minute, times[i].hour, times[i].day, times[i].month, times[i].year]
         fixed_data[i] = numpy.append(d, np.array(time))
@@ -96,55 +82,80 @@ def vectorsAppend(matrix, vector):
     return sparse.hstack((matrix, np.array(vector)[:,None]))
 
 
+def buildVectorizer():
+
+    vocab_dir = os.fsencode(".\\vocab_set")
+    text = []
+
+    for f in os.listdir(vocab_dir):
+        curf = open(os.path.join(vocab_dir, f))
+        curd = json.load(curf)
+        try:
+            for rev in curd["revisions"]:
+                text.append(rev["slots"]["main"]["content"])
+        except:
+            continue
+        del curd
+        curf.close()
+
+    v_1 = TfidfVectorizer()
+    v_1.fit_transform(text)
+    v = TfidfVectorizer(vocabulary=v_1.vocabulary_)
+    print("Vectorizer built")
+    return v
+
+
 if __name__ == "__main__":
-
-    revisions = []
-
-    with open('titles.json', "r") as f:
-        titles = json.load(f)
 
     os.chdir('dataset')
 
-    try:
-        with open('titles_fetched.json', 'r') as f:
-            titles_fetched = json.load(f)
-    except FileNotFoundError:
-        titles_fetched = {}
-
-    ## assuming our data is stored in json files numbered as they are in tites_fetched.json
-    for index, title in enumerate(titles):
-
-        if title not in titles_fetched:
-            continue
-
-        try:
-            cur_f = open(str(index) + ".json")
-            d = json.load(cur_f)
-            for r in d["revisions"]:
-                revisions.append(r)
-        except:
-            continue
-
+    revisions = []
     content = []
-    times = []
 
-    for r in revisions:
-        try:
-            content.append(r["slots"]["main"]["content"])
-            times.append(datetime.strptime(r["timestamp"], '%Y-%m-%dT%H:%M:%SZ'))
-        except:
-            continue
+    vectorizer = buildVectorizer()
+
+    for i in range(6):
+        file_name = "vectorized_data-" + str(i) + ".npz"
+        if os.path.isfile(file_name):
+            print("Dataset " + str(i) + " was already saved")
+        else:
+            directory_name = ".\dataset-" + str(i)
+            directory = os.fsencode(directory_name)
+            print("Processing data from directory " + str(i))
+
+            for file in os.listdir(directory):
+                path = os.path.join(directory, file)
+                size = os.path.getsize(path)
+                if size > 200000000:
+                    print("Warning large file size: " + str(size/1000) + "KB")
+                cur_f = open(path)
+                d = json.load(cur_f)
+                for r in d["revisions"]:
+                    try:
+                        revisions.append(r)
+                        content.append(r["slots"]["main"]["content"])
+                    except:
+                        continue
+                del d
+                cur_f.close()
 
 
-    if len(times) > len(content):
-        times = times[:len(content)]
-    elif len(content) > len(times):
-        content = content[:len(times)]
+            targets = tagsToTargets(revisions)
 
-    
-    data = contentToNgramVectors(content, 1, 2)
-    print("Data Vectorized")
-    sparse.save_npz("vectorized_data.npz", data)
-    print("Data saved")
+            if len(targets) > len(content):
+                targets = targets[:len(content)]
+            elif len(content) > len(targets):
+                content = content[:len(targets)]
 
-    #data_with_times = addTimeData(data, times)
+            data = vectorizer.fit_transform(content)
+            scaler = preprocessing.StandardScaler(with_mean=False).fit(data)
+            data_scaled = scaler.transform(data)
+            print("Dataset " + str(i) + " Vectorized")
+
+            # saves vectorized data by dataset subdirectory
+            sparse.save_npz(file_name, data_scaled)
+            # saves targets as rows in a csv
+            with open("targets.csv", 'w') as f:
+                writer = csv.writer(f)
+                writer.writerow(targets)
+            print("Dataset " + str(i) + " saved")
