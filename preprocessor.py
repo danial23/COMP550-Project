@@ -202,10 +202,10 @@ def saveDoc2Vec():
                 del d
                 cur_f.close()
 
-            if len(targets) > len(content):
-                targets = targets[:len(content)]
-            elif len(content) > len(targets):
-                content = content[:len(targets)]
+            if len(targets) > len(vectors):
+                targets = targets[:len(vectors)]
+            elif len(vectors) > len(targets):
+                vectors = vectors[:len(targets)]
 
             #vectorizer = CountVectorizer(vocabulary=vocab, ngram_range=(1, 2))
             #data = vectorizer.fit_transform(content)
@@ -217,8 +217,7 @@ def saveDoc2Vec():
             print("Processed dataset " + str(i) + " Vectorized")
 
             # saves vectorized data by dataset subdirectory
-            sparse.save_npz(file_name, data_scaled)
-            del data_scaled
+            sparse.save_npz(file_name, vectors)
             # saves targets as rows in a csv
             #with open("processed_targets.csv", 'a') as f:
             #    writer = csv.writer(f)
