@@ -244,3 +244,17 @@ def saveProcessed():
             #    del writer
             del targets
             print("Processed dataset " + str(i) + " saved")
+
+
+if __name__ == "__main__":
+
+    os.chdir('dataset')
+
+    processed = input("Processed data? (y/n) ")
+
+    if processed == 'n':
+        saveUnprocessed()
+    else:
+        saveProcessed()
+
+    print("Vectoriztion completed")
