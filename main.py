@@ -14,12 +14,12 @@ def performance(mname, predictions, goals):
     tp, fp, tn, fn = 0, 0, 0, 0
     for g, p in zip(goals, predictions):
         if p != g:
-            if p == '1':
+            if p == '1' or p == 'True':
                 fp += 1
             else:
                 fn += 1
         else:
-            if p == '1':
+            if p == '1' or p == 'True':
                 tp += 1
             else:
                 tn += 1
@@ -49,23 +49,23 @@ if __name__ == "__main__":
     nb = MultinomialNB()
     sgd = SGDClassifier()
 
-    with open("targets.csv", "r") as f:
+    with open("processed_targets.csv", "r") as f:
         targetreader = list(csv.reader(f))
 
     test_data = []
     test_targets = []
 
-    for i in range(6):
-        file_name = "vectorized_data-" + str(i) + ".npz"
+    for i in range(2):
+        file_name = "processed_vectorized-" + str(i) + ".npz"
         if os.path.isfile(file_name):
             data = sparse.load_npz(file_name)
-            targets = targetreader[i]
+            targets = targetreader[2 * i]   # targets are separated with empty line
 
             train_d, test_d, train_t, test_t = train_test_split(data, targets, test_size=0.10)
             test_data.append(test_d)
             test_targets += test_t
-            nb.partial_fit(train_d, train_t, classes=['0', '1'])
-            sgd.partial_fit(train_d, train_t, classes=['0', '1'])
+            nb.partial_fit(train_d, train_t, classes=['True', 'False'])
+            sgd.partial_fit(train_d, train_t, classes=['True', 'False'])
 
     nb_results = []
     sgd_results = []
