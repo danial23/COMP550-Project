@@ -1,10 +1,3 @@
-# Nov. 27th, 2021
-# Molly Jacobsen
-# Comp550 - Final Project
-
-# preprocessor.py
-# a few methods to preprocess data for a text classifier
-
 import os
 import json
 import csv
@@ -15,8 +8,7 @@ from sklearn import preprocessing
 import difflib
 import numpy as np
 from scipy import sparse
-from torchtext.data.utils import get_tokenizer
-from torchtext.vocab import build_vocab_from_iterator
+import gensim
 
 
 def tagsToTargets(revisions):
@@ -66,42 +58,6 @@ def timesToDiff(times):
         diffTimes.append[delta.total_seconds()]
     return diffTimes
 
-def addTimeData(data, times):
-    ## WIP
-    with data.toarray().shape as (n, m):
-        fixed_shape = (n, m+5)
-    fixed_data = np.ndarray(shape=fixed_shape, dtype=int)   #can't allocate this much space
-    for i, d in enumerate(data.toarray()):
-        time = [times[i].minute, times[i].hour, times[i].day, times[i].month, times[i].year]
-        fixed_data[i] = numpy.append(d, np.array(time))
-    return fixed_data
-    
-
-def vectorsAppend(matrix, vector):
-    # matrix and list should have same size
-    return sparse.hstack((matrix, np.array(vector)[:,None]))
-
-
-def buildVocabulary():
-    vocab_dir = os.fsencode(".\\vocab_set")
-    text = []
-
-    for f in os.listdir(vocab_dir):
-        curf = open(os.path.join(vocab_dir, f))
-        curd = json.load(curf)
-        try:
-            for rev in curd["revisions"]:
-                text.append(rev["slots"]["main"]["content"])
-        except:
-            continue
-        del curd
-        curf.close()
-
-    v = CountVectorizer(ngram_range=(1, 2))
-    v.fit_transform(text)
-    del text
-    print("Vocab Built")
-    return v.vocabulary_
 
 def buildProcessedVocabulary(text_field):
     vocab_dir = os.fsencode(".\\processed-vocab")
@@ -126,65 +82,31 @@ def buildProcessedVocabulary(text_field):
     return vocab
 
 
-def saveUnprocessed():
-    vocab = buildVocabulary()
+def tagged_document(list_of_list_of_words):
+   for i, list_of_words in enumerate(list_of_list_of_words):
+      yield gensim.models.doc2vec.TaggedDocument(list_of_words, [i])
 
-    for i in range(6):
-        file_name = "vectorized_data-" + str(i) + ".npz"
-        if os.path.isfile(file_name):
-            print("Dataset " + str(i) + " was already saved")
-        else:
-            revisions = []
-            content = []
 
-            directory_name = ".\dataset-" + str(i)
-            directory = os.fsencode(directory_name)
-            print("Processing data from directory " + str(i))
+def d2vVectorizer():
+    vocab_dir = os.fsencode(".\\processed-vocab")
+    text = []
 
-            for file in os.listdir(directory):
-                path = os.path.join(directory, file)
-                size = os.path.getsize(path)
-                if size > 200000000:
-                    continue
-                    # temporary measure to ensure I can vectorize at least a couple datasets
-                cur_f = open(path)
-                d = json.load(cur_f)
-                for r in d["revisions"]:
-                    try:
-                        revisions.append(r)
-                        content.append(r["slots"]["main"]["content"])
-                    except:
-                        continue
-                del d
-                cur_f.close()
+    for f in os.listdir(vocab_dir):
+        curf = open(os.path.join(vocab_dir, f))
+        curd = json.load(curf)
+        try:
+            for rev in curd["revisions"]:
+                text.append(list(rev["content-diff"]))
+        except:
+            continue
+        del curd
+        curf.close()
 
-            targets = tagsToTargets(revisions)
-            del revisions
-
-            if len(targets) > len(content):
-                targets = targets[:len(content)]
-            elif len(content) > len(targets):
-                content = content[:len(targets)]
-
-            vectorizer = CountVectorizer(vocabulary=vocab, ngram_range=(1, 2))
-            data = vectorizer.fit_transform(content)
-            del content
-            scaler = preprocessing.StandardScaler(with_mean=False).fit(data)
-            data_scaled = scaler.transform(data)
-            del data
-            del scaler
-            print("Dataset " + str(i) + " Vectorized")
-
-            # saves vectorized data by dataset subdirectory
-            sparse.save_npz(file_name, data_scaled)
-            del data_scaled
-            # saves targets as rows in a csv
-            with open("targets.csv", 'a') as f:
-                writer = csv.writer(f)
-                writer.writerow(targets)
-                del writer
-            del targets
-            print("Dataset " + str(i) + " saved")
+    training_text = list(tagged_document(text))
+    model = gensim.models.doc2vec.Doc2Vec(vector_size=40, min_count=2, epochs=30)
+    model.build_vocab(training_text)
+    model.train(training_text, total_examples=model.corpus_count, epochs=model.epochs)
+    return model
 
 
 def saveProcessed():
@@ -246,15 +168,76 @@ def saveProcessed():
             print("Processed dataset " + str(i) + " saved")
 
 
+def saveDoc2Vec():
+
+    doc2vecModel = d2vVectorizer()
+    print("Doc2Vec model built")
+
+    for i in range(2):
+        file_name = "d2v_vectorized-" + str(i) + ".npz"
+        if os.path.isfile(file_name):
+            print("Dataset " + str(i) + " was already saved")
+        else:
+            targets = []
+            vectors = []
+
+            directory_name = ".\\basic-processed-" + str(i)
+            directory = os.fsencode(directory_name)
+            print("Processing data from directory " + str(i))
+
+            for file in os.listdir(directory):
+                path = os.path.join(directory, file)
+                size = os.path.getsize(path)
+                if size > 200000000:
+                    continue
+                    # temporary measure to ensure I can vectorize at least a couple datasets
+                cur_f = open(path)
+                d = json.load(cur_f)
+                for r in d["revisions"]:
+                    try:
+                        targets.append(r["reverted"])
+                        vectors.append(doc2vecModel.infer_vector(list(r["content-diff"])))
+                    except:
+                        continue
+                del d
+                cur_f.close()
+
+            if len(targets) > len(content):
+                targets = targets[:len(content)]
+            elif len(content) > len(targets):
+                content = content[:len(targets)]
+
+            #vectorizer = CountVectorizer(vocabulary=vocab, ngram_range=(1, 2))
+            #data = vectorizer.fit_transform(content)
+            #del content
+            #scaler = preprocessing.StandardScaler(with_mean=False).fit(data)
+            #data_scaled = scaler.transform(data)
+            #del data
+            #del scaler
+            print("Processed dataset " + str(i) + " Vectorized")
+
+            # saves vectorized data by dataset subdirectory
+            sparse.save_npz(file_name, data_scaled)
+            del data_scaled
+            # saves targets as rows in a csv
+            #with open("processed_targets.csv", 'a') as f:
+            #    writer = csv.writer(f)
+            #    writer.writerow(targets)
+            #    del writer
+            del targets
+            print("Processed dataset " + str(i) + " saved")
+
+
 if __name__ == "__main__":
 
     os.chdir('dataset')
 
-    processed = input("Processed data? (y/n) ")
+    processed = input("Doc2Vec? (y/n) ")
 
-    if processed == 'n':
-        saveUnprocessed()
+    if processed == 'y':
+        saveDoc2Vec()
     else:
         saveProcessed()
 
     print("Vectoriztion completed")
+
