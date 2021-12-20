@@ -1,3 +1,10 @@
+# Nov. 27th, 2021
+# Molly Jacobsen
+# Comp550 - Final Project
+
+# preprocessor.py
+# a few methods to preprocess data for a text classifier
+
 import os
 import json
 import csv
@@ -103,9 +110,11 @@ def d2vVectorizer():
         curf.close()
 
     training_text = list(tagged_document(text))
-    model = gensim.models.doc2vec.Doc2Vec(vector_size=40, min_count=2, epochs=30)
+    del text
+    model = gensim.models.doc2vec.Doc2Vec(vector_size=25, min_count=2, epochs=30)
     model.build_vocab(training_text)
     model.train(training_text, total_examples=model.corpus_count, epochs=model.epochs)
+    del training_text
     return model
 
 
@@ -217,7 +226,9 @@ def saveDoc2Vec():
             print("Processed dataset " + str(i) + " Vectorized")
 
             # saves vectorized data by dataset subdirectory
-            sparse.save_npz(file_name, vectors)
+            data = sparse.csr_matrix(vectors)
+            del vectors
+            sparse.save_npz(file_name, data)
             # saves targets as rows in a csv
             #with open("processed_targets.csv", 'a') as f:
             #    writer = csv.writer(f)
@@ -239,4 +250,3 @@ if __name__ == "__main__":
         saveProcessed()
 
     print("Vectoriztion completed")
-
