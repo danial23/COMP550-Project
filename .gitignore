@@ -8,8 +8,14 @@ basic-processed/*
 # vscode settings
 .vscode/*
 
+# intellij idea settings
+.idea/*
+
 # ignore pycache
 __pycache__
+
+# saved model
+doc2vec/*
 
 # exception
 !dataset/titles_fetched.json
