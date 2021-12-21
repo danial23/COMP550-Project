@@ -1,3 +1,12 @@
+# Nov. 27th, 2021
+# Molly Jacobsen
+# Comp550 - Final Project
+
+# main.py
+# main method for training and testing linear models
+# requires vectorized data to be stored in files named vectorized-0.npz and vectorized-1.npz
+# if using doc2vec vectorization, comment out nb code
+
 import pandas as pd
 import os
 import csv
@@ -49,17 +58,21 @@ if __name__ == "__main__":
     nb = MultinomialNB()
     sgd = SGDClassifier()
 
-    with open("processed_targets.csv", "r") as f:
+    with open("targets.csv", "r") as f:
         targetreader = list(csv.reader(f))
 
     test_data = []
     test_targets = []
 
     for i in range(2):
-        file_name = "processed_vectorized-" + str(i) + ".npz"
+        file_name = "vectorized-" + str(i) + ".npz"
         if os.path.isfile(file_name):
             data = sparse.load_npz(file_name)
             targets = targetreader[2 * i]   # targets are separated with empty line
+
+            m = data.get_shape()[0]
+            if m < len(targets):
+                targets = targets[:m]
 
             train_d, test_d, train_t, test_t = train_test_split(data, targets, test_size=0.10)
             test_data.append(test_d)
