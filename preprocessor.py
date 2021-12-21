@@ -4,6 +4,7 @@
 
 # preprocessor.py
 # a few methods to preprocess data for a text classifier
+# when run as script, vectorizes data from datasets labeled basic-processed-0 and basic-processed-1 into npz files
 
 import os
 import json
@@ -111,7 +112,7 @@ def d2vVectorizer():
 
     training_text = list(tagged_document(text))
     del text
-    model = gensim.models.doc2vec.Doc2Vec(vector_size=25, min_count=2, epochs=30)
+    model = gensim.models.doc2vec.Doc2Vec(vector_size=250, epochs=30)
     model.build_vocab(training_text)
     model.train(training_text, total_examples=model.corpus_count, epochs=model.epochs)
     del training_text
@@ -121,9 +122,11 @@ def d2vVectorizer():
 def saveProcessed():
 
     vocab = buildProcessedVocabulary("content-diff")
+    if os.path.isfile("targets.csv"):
+        targets_saved = True
 
     for i in range(2):
-        file_name = "processed_vectorized-" + str(i) + ".npz"
+        file_name = "vectorized-" + str(i) + ".npz"
         if os.path.isfile(file_name):
             print("Dataset " + str(i) + " was already saved")
         else:
@@ -169,10 +172,12 @@ def saveProcessed():
             sparse.save_npz(file_name, data_scaled)
             del data_scaled
             # saves targets as rows in a csv
-            #with open("processed_targets.csv", 'a') as f:
-            #    writer = csv.writer(f)
-            #    writer.writerow(targets)
-            #    del writer
+            if not targets_saved:
+                # saves targets as rows in a csv
+                with open("targets.csv", 'a') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(targets)
+                    del writer
             del targets
             print("Processed dataset " + str(i) + " saved")
 
@@ -181,9 +186,11 @@ def saveDoc2Vec():
 
     doc2vecModel = d2vVectorizer()
     print("Doc2Vec model built")
+    if os.path.isfile("targets.csv"):
+        targets_saved = True
 
     for i in range(2):
-        file_name = "d2v_vectorized-" + str(i) + ".npz"
+        file_name = "vectorized-" + str(i) + ".npz"
         if os.path.isfile(file_name):
             print("Dataset " + str(i) + " was already saved")
         else:
@@ -216,24 +223,19 @@ def saveDoc2Vec():
             elif len(vectors) > len(targets):
                 vectors = vectors[:len(targets)]
 
-            #vectorizer = CountVectorizer(vocabulary=vocab, ngram_range=(1, 2))
-            #data = vectorizer.fit_transform(content)
-            #del content
-            #scaler = preprocessing.StandardScaler(with_mean=False).fit(data)
-            #data_scaled = scaler.transform(data)
-            #del data
-            #del scaler
             print("Processed dataset " + str(i) + " Vectorized")
 
             # saves vectorized data by dataset subdirectory
             data = sparse.csr_matrix(vectors)
             del vectors
             sparse.save_npz(file_name, data)
-            # saves targets as rows in a csv
-            #with open("processed_targets.csv", 'a') as f:
-            #    writer = csv.writer(f)
-            #    writer.writerow(targets)
-            #    del writer
+
+            if not targets_saved:
+                # saves targets as rows in a csv
+                with open("targets.csv", 'a') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(targets)
+                    del writer
             del targets
             print("Processed dataset " + str(i) + " saved")
 
