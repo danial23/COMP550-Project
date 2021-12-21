@@ -1,11 +1,12 @@
 import os
 import json
-import preprocessor as pp
+#import preprocessor as pp
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import CountVectorizer
 from keras.backend import clear_session
 from keras.models import Sequential
 from keras import layers
+from keras import metrics
 import numpy as np
 
 def load_files(directory):
@@ -17,11 +18,14 @@ def load_files(directory):
         try:
             for r in d["revisions"]:
                 revisions.append(r)
+                #print(r)
             print(file)
+
         except:
 
             continue
         cur_f.close()
+    #print(revisions)
     return revisions
 
 
@@ -45,14 +49,18 @@ if __name__ == "__main__":
     revisions = load_files(os.fsencode("./dataset/temp_dataset"))
     tags = []
     content = []
+    cont_diff = []
 
     for r in revisions:
         try:
             #print(r)
             tag = r["tags"]
-            conte = r["slots"]["main"]["content"]
+            #conte = r["slots"]["main"]["content"]
+            conte = r["content"]
+            conte_dif = r["content-diff"]
             tags.append(tag)
             content.append(conte)
+            cont_diff.append(conte_dif)
         except:
             #print(r)
             continue
@@ -87,16 +95,24 @@ if __name__ == "__main__":
     clear_session()
 
     model = Sequential()
+    model.add(layers.Dense(20, input_dim=input_dim, activation='relu'))
     model.add(layers.Dense(10, input_dim=input_dim, activation='relu'))
+    model.add(layers.Dense(5, input_dim=input_dim, activation='relu'))
     model.add(layers.Dense(1, activation='sigmoid'))
-    model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
+    model.compile(loss='mean_squared_error', optimizer='adam', metrics=[metrics.BinaryAccuracy(), metrics.TruePositives(), metrics.TrueNegatives(), metrics.FalseNegatives(), metrics.FalsePositives()])
     model.summary()
 
     history = model.fit(X_train, y_train, epochs=20, verbose=True, validation_data=(X_test, y_test), batch_size=10)
-    loss, accuracy = model.evaluate(X_train, y_train, verbose=False)
-    print("Training Accuracy: {:.4f}".format(accuracy))
-    loss, accuracy = model.evaluate(X_test, y_test, verbose=False)
+    #loss, accuracy, recall, percision = model.evaluate(X_train, y_train, verbose=True)
+    #print("Training Accuracy: {:.4f}".format(accuracy))
+    #print("Recall = " + str(recall))
+    #print("Precision = " + str(percision))
+    loss, accuracy, TruePositives, TrueNegatives, FalseNegatives, FalsePositives = model.evaluate(X_test, y_test, verbose=True)
     print("Testing Accuracy:  {:.4f}".format(accuracy))
+    print("TruePositives = " + str(TruePositives))
+    print("TrueNegatives = " + str(TrueNegatives))
+    print("FalseNegatives = " + str(FalseNegatives))
+    print("FalsePositives = " + str(FalsePositives))
 
 
 
